@@ -18,6 +18,18 @@ Without it, the chat falls back to the deterministic findings. The AI only expla
 
 Tests: `cd backend && python -m pytest tests -q` (60 tests).
 
+## Publish online with a real link (Render)
+
+1. Push this folder to a **private** GitHub repository.
+2. On https://render.com sign in with GitHub, then **New → Blueprint** and pick the repository.
+   Render reads `render.yaml`: one web service (Docker) and one PostgreSQL database.
+3. When asked for `FAP_PASSWORD`, type the password people will use to sign in. `FAP_SECRET` is generated for you.
+4. Wait for the build (about 5–10 minutes). Your link is `https://financial-analysis-platform-XXXX.onrender.com`.
+
+Notes: on Render's free plan the service sleeps after 15 minutes without visits (the next visit takes ~1 minute to wake),
+and the free database has a time limit set by Render — upgrade the database plan to keep data long-term.
+Locally, without `FAP_PASSWORD`, the platform stays open as before.
+
 ## Architecture
 
 | Layer | Location | Notes |
