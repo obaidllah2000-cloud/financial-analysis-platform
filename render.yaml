@@ -1,19 +1,16 @@
-# Render Blueprint: one web service (Docker) + one PostgreSQL database.
+# Render Blueprint: one free web service (Docker). The database is the free Supabase project,
+# so Render never needs a paid database or a payment card.
 services:
   - type: web
     name: financial-analysis-platform
     runtime: docker
     plan: free
+    region: frankfurt          # same region as the Supabase database (eu-central-1)
     healthCheckPath: /api/auth/status
     envVars:
+      - key: DATABASE_URL
+        sync: false            # paste the Supabase "Session pooler" URI (with your database password)
       - key: FAP_PASSWORD
-        sync: false            # Render asks you to type the password when you create the service
+        sync: false            # the password people type to sign in to the platform
       - key: FAP_SECRET
         generateValue: true    # random key that signs login sessions
-      - key: DATABASE_URL
-        fromDatabase:
-          name: financial-analysis-db
-          property: connectionString
-databases:
-  - name: financial-analysis-db
-    plan: free
