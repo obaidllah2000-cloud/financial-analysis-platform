@@ -16,11 +16,11 @@ Open http://localhost:8000. Data is stored in `backend/data/platform.db` (SQLite
 Optional: set `ANTHROPIC_API_KEY` to let the AI Analyst chat answer in natural language (Claude Opus 5.5).
 Without it, the chat falls back to the deterministic findings. The AI only explains; it never does the maths.
 
-Tests: `cd backend && python -m pytest tests -q` (60 tests).
+Tests: `cd backend && python -m pytest tests -q` (62 tests).
 
 ## Publish online with a real link (Render)
 
-1. Push this folder to a **private** GitHub repository.
+1. Push this folder to a GitHub repository.
 2. On https://render.com sign in with GitHub, then **New → Blueprint** and pick the repository.
    Render reads `render.yaml`: one web service (Docker) and one PostgreSQL database.
 3. When asked for `FAP_PASSWORD`, type the password people will use to sign in. `FAP_SECRET` is generated for you.
@@ -57,7 +57,7 @@ best liquidity measure rule · EVA = NP − (I + PS div + CS div + 10% × R/E) �
 Professional alternatives are separate, labelled and configurable (see `docs/METHODOLOGY.md`).
 
 ## Known limitations
-- Identity is header-based (user picker), not real authentication.
+- Online access is protected by one shared password (`FAP_PASSWORD`). Inside the platform, people pick their role from a list; there are no individual user accounts yet.
 - Benchmark presets are course teaching examples or generic rules of thumb, not real industry data; enter your own.
 - PDF export is in English only. The UI supports Arabic.
 - The Q4 handwritten solution's EVA "after" uses 179 (the N/P balance) as net profit and gets −79. The platform uses the forecast net profit (≈138), which gives ≈ −120. Since "before" is ≈ −109, EVA actually falls, so the solution's conclusion ("EVA increases → accept") reverses. Check this one with the instructor.
