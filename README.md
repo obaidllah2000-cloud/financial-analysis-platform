@@ -1,3 +1,13 @@
+---
+title: Financial Analysis Platform
+emoji: 📊
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 8000
+pinned: false
+---
+
 # AI-Powered Corporate Financial Analysis Platform
 
 Excel is the data-entry interface; the website is the review, calculation, comparison and decision-support environment.
@@ -17,6 +27,17 @@ Optional: set `ANTHROPIC_API_KEY` to let the AI Analyst chat answer in natural l
 Without it, the chat falls back to the deterministic findings. The AI only explains; it never does the maths.
 
 Tests: `cd backend && python -m pytest tests -q` (62 tests).
+
+## Publish online for free, no card (Hugging Face Spaces + Supabase)
+
+1. **Database (Supabase, free):** open the project `financial-analysis-platform` → **Connect** → **Session pooler** → copy the URI.
+   Set the database password under Project Settings → Database, and put it in the URI in place of `[YOUR-PASSWORD]`.
+2. **Space (Hugging Face, free):** New Space → SDK **Docker** → Blank. In the Space's **Settings → Variables and secrets** add three secrets:
+   `DATABASE_URL` (the URI from step 1), `FAP_PASSWORD` (the sign-in password) and `FAP_SECRET` (any long random text).
+3. Push this repository to the Space: `git push https://huggingface.co/spaces/<user>/<space> main`.
+   The README header above tells Hugging Face to build the `Dockerfile` and open port 8000.
+
+Free-tier limits: the Space sleeps after ~48 hours without visits; the Supabase database pauses after a week without activity (resume it from the dashboard; data is kept).
 
 ## Publish online with a real link (Render)
 
