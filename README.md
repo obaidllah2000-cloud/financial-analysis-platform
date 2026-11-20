@@ -16,7 +16,7 @@ Excel is the data-entry interface; the website is the review, calculation, compa
 ## Run
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 cd frontend && npm install && npm run build && cd ..
 python -m uvicorn app.main:app --app-dir backend --port 8000
 ```
@@ -28,7 +28,16 @@ Without it, the chat falls back to the deterministic findings. The AI only expla
 
 Tests: `cd backend && python -m pytest tests -q` (62 tests).
 
-## Publish online for free, no card (Hugging Face Spaces + Supabase)
+## Publish online for free, no card (Vercel + Supabase)
+
+1. **Database:** Supabase project `financial-analysis-platform` → **Connect** → **Direct** → **Session pooler** URI, with the database password in place of `[YOUR-PASSWORD]`.
+2. **Site:** sign in to https://vercel.com with GitHub → **Add New → Project** → import this repository (settings come from `vercel.json`).
+3. **Environment Variables:** `DATABASE_URL`, `FAP_PASSWORD`, `FAP_SECRET` (any long random text) → **Deploy**.
+
+`api/index.py` runs the FastAPI app as a serverless function; the React build is served as static files.
+Limits on the free plan: uploads up to 4.5 MB per request; the first request after idle time is slower.
+
+## Older option: Hugging Face Spaces + Supabase (Docker Spaces now need a paid plan)
 
 1. **Database (Supabase, free):** open the project `financial-analysis-platform` → **Connect** → **Session pooler** → copy the URI.
    Set the database password under Project Settings → Database, and put it in the URI in place of `[YOUR-PASSWORD]`.

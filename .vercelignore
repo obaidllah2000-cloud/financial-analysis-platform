@@ -1,0 +1,6 @@
+ref/
+backend/data/
+backend/tests/
+node_modules/
+.claude/
+deploy-secrets.local.txt
