@@ -1,8 +1,8 @@
 import os
 from pathlib import Path
 
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import create_engine, select, text
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import NullPool
 
 from .models import Base, User
@@ -22,12 +22,17 @@ SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
 
 def init_db():
-    Base.metadata.create_all(engine)
-    with SessionLocal() as s:
-        if not s.scalars(select(User)).first():
-            s.add_all([User(name="Lead Analyst", role="admin"), User(name="Financial Analyst", role="analyst"),
-                       User(name="Reviewer", role="reviewer"), User(name="Management (view only)", role="viewer")])
-            s.commit()
+    """Create missing tables and seed default users. On PostgreSQL an advisory lock makes this safe when
+    several serverless instances start at the same moment (only one creates tables / seeds at a time)."""
+    with engine.begin() as conn:
+        if conn.dialect.name == "postgresql":
+            conn.execute(text("SELECT pg_advisory_xact_lock(735190421)"))
+        Base.metadata.create_all(conn)
+        with Session(bind=conn) as s:
+            if not s.scalars(select(User)).first():
+                s.add_all([User(name="Lead Analyst", role="admin"), User(name="Financial Analyst", role="analyst"),
+                           User(name="Reviewer", role="reviewer"), User(name="Management (view only)", role="viewer")])
+                s.flush()
 
 
 def get_db():
