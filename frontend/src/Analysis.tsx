@@ -17,6 +17,35 @@ function useAnalysis(co: any, years?: number[]) {
   return { d, err };
 }
 
+function useInterpretation(co: any) {
+  const [d, setD] = useState<any>(null);
+  useEffect(() => { api.get(`/api/companies/${co.id}/interpretation`).then(setD).catch(() => setD({ ratios: {}, dupont: {}, sources_uses: [] })); }, [co.id, co.data_version]);
+  return d;
+}
+
+const VERDICT_CHIP: Record<string, string> = { favorable: "verified", unfavorable: "invalid", mixed: "provisional", neutral: "pending", "n/a": "needs_info" };
+
+/** The professor's 7 steps: result, comparison, increase/decrease, meaning, favorable or not, impact, conclusion & recommendation. */
+export function SevenSteps({ items, years }: { items: any[]; years: number[] }) {
+  const usable = (items || []).filter((x) => x.steps?.length);
+  const [y, setY] = useState<number | null>(null);
+  if (!usable.length) return <p className="small muted">n/a</p>;
+  const cur = usable.find((x) => x.year === y) || usable[usable.length - 1];
+  return (
+    <div className="panel" style={{ margin: "8px 0", background: "var(--card, #fff)" }}>
+      <div className="row" style={{ justifyContent: "space-between" }}>
+        <b>Academic interpretation (professor's method)</b>
+        <div className="row">{years.filter((yy) => usable.some((x) => x.year === yy)).map((yy) =>
+          <button key={yy} className={`btn sm ${cur.year === yy ? "pri" : ""}`} onClick={() => setY(yy)}>{yy}</button>)}</div>
+      </div>
+      <div className="row small" style={{ margin: "6px 0" }}><Chip s={VERDICT_CHIP[cur.verdict] || "pending"} label={cur.verdict} />
+        <Chip s={cur.basis === "academic" ? "verified" : "pending"} label={cur.basis} /><Chip s={cur.status} /></div>
+      <ol style={{ margin: 0, paddingInlineStart: 22 }}>{cur.steps.map((st: any, i: number) =>
+        <li key={i} style={{ marginBottom: 6 }}><b>{st.title}</b><div className="small" style={{ whiteSpace: "pre-wrap" }}>{st.text}</div></li>)}</ol>
+    </div>
+  );
+}
+
 function YearPicker({ all, sel, setSel }: { all: number[]; sel: number[]; setSel: (y: number[]) => void }) {
   return <div className="row small">Years:{all.map((y) => <label key={y} className="row" style={{ gap: 3 }}><input type="checkbox" checked={sel.includes(y)}
     onChange={(e) => setSel(e.target.checked ? [...sel, y].sort() : sel.filter((x) => x !== y))} />{y}</label>)}</div>;
@@ -96,6 +125,7 @@ export function Ratios({ co }: any) {
   const [trace, setTrace] = useState<any>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [cat, setCat] = useState("all");
+  const interp = useInterpretation(co);
   if (err) return <div className="badbox">{err}</div>;
   if (!d) return <p>Loading…</p>;
   const ys: number[] = d.years;
@@ -125,8 +155,10 @@ export function Ratios({ co }: any) {
                     <dt>Assessment</dt><dd>{r.comment}</dd><dt>Risk basis</dt><dd>{r.risk_basis}</dd>
                     {r.action && <><dt>Suggested action</dt><dd>{r.action}</dd></>}<dt>Source</dt><dd>{r.source}</dd>
                     {r.assumptions.length > 0 && <><dt>Assumptions</dt><dd className="mono small">{r.assumptions.join(", ")}</dd></>}</dl>
+                  {interp ? <SevenSteps items={interp.ratios[r.key]} years={ys} /> : <p className="small muted">Loading…</p>}
+                  {r.key === "roi" && interp?.dupont && <DupontBox d={interp.dupont} years={ys} />}
                   {r.unit !== "text" && <div style={{ height: 160 }}><ResponsiveContainer><LineChart data={r.cells.map((x: any) => ({ year: x.year, v: x.value, b: r.benchmark?.value }))}>
-                    <CartesianGrid strokeDasharray="3 3" opacity={0.3} /><XAxis dataKey="year" /><YAxis /><Tooltip /><Line dataKey="v" name={r.name_en} stroke={PALETTE[0]} strokeWidth={2} />
+                    <CartesianGrid strokeDasharray="3 3" opacity={0.3} /><XAxis dataKey="year" /><YAxis /><Tooltip /><Line dataKey="v" name={lang === "ar" ? r.name_ar : r.name_en} stroke={PALETTE[0]} strokeWidth={2} />
                     {r.benchmark && <Line dataKey="b" name="Benchmark" stroke={PALETTE[2]} strokeDasharray="5 4" dot={false} />}</LineChart></ResponsiveContainer></div>}
                 </td></tr>}
               </Fragment>); })}</tbody></table></div>
@@ -147,6 +179,7 @@ const RATIO_SETS: Record<string, string[]> = {
 };
 
 export function Comparison({ co }: any) {
+  const lang = useLang();
   const [all, setAll] = useState<number[]>([]);
   const [sel, setSel] = useState<number[]>([]);
   const { d } = useAnalysis(co, sel);
@@ -158,7 +191,7 @@ export function Comparison({ co }: any) {
   if (!d) return <p>Loading…</p>;
   const ys: number[] = d.years;
   const dataA = ys.map((y) => Object.fromEntries([["year", y], ...CHART_SETS[cs].filter((k) => lines[k]).map((k) => [lines[k].label, lines[k].values[y]])]));
-  const dataR = ys.map((y) => Object.fromEntries([["year", y], ...RATIO_SETS[rs].filter((k) => ratios[k]).map((k) => [ratios[k].name_en, ratios[k].cells.find((c: any) => c.year === y)?.value])]));
+  const dataR = ys.map((y) => Object.fromEntries([["year", y], ...RATIO_SETS[rs].filter((k) => ratios[k]).map((k) => [lang === "ar" ? ratios[k].name_ar : ratios[k].name_en, ratios[k].cells.find((c: any) => c.year === y)?.value])]));
   return (
     <>
       <div className="panel"><YearPicker all={all} sel={sel} setSel={(y) => y.length >= 1 && setSel(y)} /></div>
@@ -170,7 +203,7 @@ export function Comparison({ co }: any) {
         <div className="panel"><div className="row" style={{ justifyContent: "space-between" }}><h2>Ratios</h2>
           <select value={rs} onChange={(e) => setRs(e.target.value)}>{Object.keys(RATIO_SETS).map((k) => <option key={k}>{k}</option>)}</select></div>
           <div style={{ height: 280 }}><ResponsiveContainer><LineChart data={dataR}><CartesianGrid strokeDasharray="3 3" opacity={0.3} /><XAxis dataKey="year" /><YAxis /><Tooltip /><Legend />
-            {RATIO_SETS[rs].filter((k) => ratios[k]).map((k, i) => <Line key={k} dataKey={ratios[k].name_en} stroke={PALETTE[i]} strokeWidth={2} />)}</LineChart></ResponsiveContainer></div></div>
+            {RATIO_SETS[rs].filter((k) => ratios[k]).map((k, i) => <Line key={k} dataKey={lang === "ar" ? ratios[k].name_ar : ratios[k].name_en} stroke={PALETTE[i]} strokeWidth={2} />)}</LineChart></ResponsiveContainer></div></div>
       </div>
       <div className="panel">
         <h2>Multi-year comparison — horizontal analysis</h2>
@@ -196,8 +229,16 @@ export function Comparison({ co }: any) {
   );
 }
 
+function DupontBox({ d, years }: { d: any; years: number[] }) {
+  const y = [...years].reverse().find((yy) => d[yy]?.length || (d[yy] && typeof d[yy] === "string"));
+  if (y === undefined) return null;
+  const v = d[y];
+  return <div className="note small"><b>{`DuPont ${y}`}</b><div style={{ whiteSpace: "pre-wrap" }}>{Array.isArray(v) ? v.join(" ") : typeof v === "string" ? v : v?.text || JSON.stringify(v)}</div></div>;
+}
+
 export function SourcesUses({ co }: any) {
   const { d } = useAnalysis(co);
+  const interp = useInterpretation(co);
   const [i, setI] = useState(-1);
   if (!d) return <p>Loading…</p>;
   if (!d.sources_uses.length) return <div className="warnbox">At least two years of balance sheets are needed.</div>;
@@ -207,7 +248,8 @@ export function SourcesUses({ co }: any) {
   return (
     <>
       <div className="row" style={{ marginBottom: 12 }}>{d.sources_uses.map((s: any, k: number) => <button key={k} className={`btn sm ${su === s ? "pri" : ""}`} onClick={() => setI(k)}>{s.from_year} → {s.to_year}</button>)}</div>
-      <div className={su.reconciled ? "okbox" : "badbox"}>Total sources {fmtNum(su.total_sources)} {su.reconciled ? "=" : "≠"} total uses {fmtNum(su.total_uses)}{su.reconciled ? " — reconciled." : ` (difference ${fmtNum(su.difference)}) — check classifications.`}</div>
+      <div className={su.reconciled ? "okbox" : "badbox"}>{su.reconciled ? `Total sources ${fmtNum(su.total_sources)} = total uses ${fmtNum(su.total_uses)} — reconciled.`
+        : `Total sources ${fmtNum(su.total_sources)} ≠ total uses ${fmtNum(su.total_uses)} (difference ${fmtNum(su.difference)}) — check classifications.`}</div>
       <div className="grid g4">
         <div className="kpi"><div className="l">Short-term sources / uses</div><div className="v">{fmtPct(su.short_term_sources_pct)} / {fmtPct(su.short_term_uses_pct)}</div></div>
         <div className="kpi"><div className="l">Long-term sources / uses</div><div className="v">{fmtPct(su.long_term_sources_pct)} / {fmtPct(su.long_term_uses_pct)}</div></div>
@@ -220,6 +262,9 @@ export function SourcesUses({ co }: any) {
             <tbody>{list.map((r: any) => <tr key={r.account_id}><td>{r.description}{r.internal != null && <span className="small muted"> · {r.internal ? "internal" : "external"}</span>}</td><td className="small">{r.term}</td>
               <td className="n">{fmtNum(r.amount)}</td><td className="n">{fmtPct(r.pct)}</td></tr>)}</tbody></table></div>))}
       </div>
+      {(() => { const t = interp?.sources_uses?.find((x: any) => x.from_year === su.from_year && x.to_year === su.to_year)?.text; return t ? (
+        <div className="panel"><h2>Analysis (professor's method)</h2>
+          {(Array.isArray(t) ? t : [t]).map((p: any, k: number) => <p key={k} style={{ whiteSpace: "pre-wrap" }}>{typeof p === "string" ? p : p.text || JSON.stringify(p)}</p>)}</div>) : null; })()}
       <div className="panel"><h2>Full movement table</h2><div className="scroll"><table>
         <thead><tr><th>Account</th><th className="n">Opening ({su.from_year})</th><th className="n">Closing ({su.to_year})</th><th className="n">Change</th><th>Source / use</th><th>Status</th></tr></thead>
         <tbody>{su.rows.map((r: any) => <tr key={r.account_id}><td>{r.account}</td><td className="n">{fmtNum(r.opening)}</td><td className="n">{fmtNum(r.closing)}</td><td className="n">{fmtNum(r.change)}</td>

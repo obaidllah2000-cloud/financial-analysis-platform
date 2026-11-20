@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api } from "./api";
+import { api, getLang } from "./api";
 import { useT } from "./i18n";
 import { Chip } from "./ui";
 
@@ -38,7 +38,7 @@ export function AIAnalyst({ co, meta, go }: any) {
   const ask = async (question: string) => {
     if (!question.trim()) return;
     setMsgs((m) => [...m, { u: question }]); setQ(""); setBusy(true);
-    try { const r = await api.post(`/api/companies/${co.id}/chat`, { question }); setMsgs((m) => [...m, { a: r }]); }
+    try { const r = await api.post(`/api/companies/${co.id}/chat`, { question, lang: getLang() }); setMsgs((m) => [...m, { a: r }]); }
     catch (e: any) { setMsgs((m) => [...m, { a: { ok: false, reason: e.message } }]); } finally { setBusy(false); }
   };
   const view = obs.filter((o) => !lvl || o.level === lvl);
@@ -76,12 +76,13 @@ export function Evaluation({ co, meta, bump }: any) {
   const [msg, setMsg] = useState<any>(null);
   const [mods, setMods] = useState<string[]>(meta?.modules || []);
   const [years, setYears] = useState<number[]>([]);
+  const [rlang, setRlang] = useState<string>(getLang());
   const load = () => api.get(`/api/companies/${co.id}/evaluation`).then((x) => { setD(x); if (!years.length) setYears(x.years); });
   useEffect(() => { load(); }, [co.id]);
   if (!d) return <p>Loading…</p>;
   const ev = d.evaluation;
   const approve = async () => { setMsg(null); try { await api.post(`/api/companies/${co.id}/approve`); setMsg({ ok: true, t: "Analysis approved and frozen as a snapshot." }); load(); bump(); } catch (e: any) { setMsg({ ok: false, t: e.message }); } };
-  const qs = `?years=${years.join(",")}&modules=${mods.join(",")}`;
+  const qs = `?years=${years.join(",")}&modules=${mods.join(",")}&lang=${rlang}`;
   return (
     <>
       <div className={d.approval_status === "approved" ? "okbox" : d.approval_status === "ready_for_approval" ? "note" : "warnbox"}>
@@ -89,11 +90,15 @@ export function Evaluation({ co, meta, bump }: any) {
       <div className="panel">
         <h2>Approval & export</h2>
         <div className="row"><button className="btn pri" disabled={d.approval_status !== "ready_for_approval"} onClick={approve}>{t("Approve analysis")}</button>
-          {d.approval_status === "provisional" && <span className="small muted">Blocked: {d.governance.critical_pending_classifications} pending classifications, {d.governance.pending_assumptions.length} pending assumptions, {d.governance.issues?.error || 0} data errors.</span>}</div>
+          {d.approval_status === "provisional" && <span className="small muted">{`Blocked: ${d.governance.critical_pending_classifications} pending classifications, ${d.governance.pending_assumptions.length} pending assumptions, ${d.governance.issues?.error || 0} data errors.`}</span>}</div>
         {msg && <div className={msg.ok ? "okbox" : "badbox"} style={{ marginTop: 8 }}>{msg.t}</div>}
         <h3>Report content</h3>
         <div className="row small">Years: {d.years.map((y: number) => <label key={y} className="row" style={{ gap: 3 }}><input type="checkbox" checked={years.includes(y)} onChange={(e) => setYears(e.target.checked ? [...years, y].sort() : years.filter((x) => x !== y))} />{y}</label>)}</div>
-        <div className="row small" style={{ marginTop: 6 }}>Modules: {(meta?.modules || []).map((m: string) => <label key={m} className="row" style={{ gap: 3 }}><input type="checkbox" checked={mods.includes(m)} onChange={(e) => setMods(e.target.checked ? [...mods, m] : mods.filter((x) => x !== m))} />{m.replace("_", " ")}</label>)}</div>
+        <div className="row small" style={{ marginTop: 6 }}>Modules: {(meta?.modules || []).map((m: string) => <label key={m} className="row" style={{ gap: 3 }}><input type="checkbox" checked={mods.includes(m)} onChange={(e) => setMods(e.target.checked ? [...mods, m] : mods.filter((x) => x !== m))} />{m.replace(/_/g, " ")}</label>)}</div>
+        <div className="row small" style={{ marginTop: 6 }}><span>Report language</span>
+          <label className="row" style={{ gap: 3 }}><input type="radio" checked={rlang === "ar"} onChange={() => setRlang("ar")} /><span data-no-translate>العربية</span></label>
+          <label className="row" style={{ gap: 3 }}><input type="radio" checked={rlang === "en"} onChange={() => setRlang("en")} /><span data-no-translate>English</span></label></div>
+        <p className="small muted">The report always reflects the current approved data, classifications and assumptions; it is regenerated on every download.</p>
         <div className="row" style={{ marginTop: 10 }}><a className="btn" href={`/api/companies/${co.id}/report.xlsx${qs}`}>{t("Export Excel")}</a><a className="btn" href={`/api/companies/${co.id}/report.pdf${qs}`}>{t("Export PDF")}</a></div>
       </div>
       <div className="panel">

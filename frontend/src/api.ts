@@ -2,7 +2,12 @@ let userId = Number(localStorage.getItem("fap_user") || "0") || 0;
 export const setUser = (id: number) => { userId = id; try { localStorage.setItem("fap_user", String(id)); } catch { /* ignore */ } };
 export const getUser = () => userId;
 
+export const getLang = (): "en" | "ar" => { try { return localStorage.getItem("fap_lang") === "ar" ? "ar" : "en"; } catch { return "en"; } };
+/** Adds the selected language so the server returns texts (never numbers) in that language. */
+export const withLang = (url: string) => (url.includes("lang=") ? url : `${url}${url.includes("?") ? "&" : "?"}lang=${getLang()}`);
+
 async function req(method: string, url: string, body?: unknown, isForm = false) {
+  url = withLang(url);
   const headers: Record<string, string> = {};
   if (userId) headers["X-User-Id"] = String(userId);
   if (body && !isForm) headers["Content-Type"] = "application/json";

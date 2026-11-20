@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
+import { useLayoutEffect } from "react";
 import { api, getUser, setUser } from "./api";
-import { Lang, LangCtx, useT } from "./i18n";
+import { Lang, LangCtx, useLang, useT } from "./i18n";
+import { startArabic, stopArabic } from "./i18n_ui";
 import Workspace from "./Workspace";
 import { Chip } from "./ui";
 
@@ -39,7 +41,14 @@ function Login({ onDone }: { onDone: () => void }) {
 }
 
 function Main({ showLogout }: { showLogout: boolean }) {
-  const [lang, setLang] = useState<Lang>(() => (localStorage.getItem("fap_lang") as Lang) || "en");
+  const [lang, setLangState] = useState<Lang>(() => (localStorage.getItem("fap_lang") as Lang) || "en");
+  // Store the choice before re-rendering so every request made by the re-mounted pages already carries it.
+  const setLang = (l: Lang) => { try { localStorage.setItem("fap_lang", l); } catch { /* */ } setLangState(l); };
+  useLayoutEffect(() => {
+    const root = document.getElementById("root");
+    if (lang === "ar" && root) startArabic(root); else stopArabic();
+    return () => stopArabic();
+  }, [lang]);
   const [view, setView] = useState<View>({ page: "companies" });
   const [companies, setCompanies] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
@@ -50,7 +59,7 @@ function Main({ showLogout }: { showLogout: boolean }) {
   useEffect(() => { document.documentElement.dir = lang === "ar" ? "rtl" : "ltr"; document.documentElement.lang = lang; try { localStorage.setItem("fap_lang", lang); } catch { /* */ } }, [lang]);
   return (
     <LangCtx.Provider value={lang}>
-      <div className="app">
+      <div className="app" key={lang}>
         <Side showLogout={showLogout} view={view} setView={setView} companies={companies} lang={lang} setLang={setLang} users={users} uid={uid}
           setUid={(id: number) => { setUser(id); setUid(id); }} />
         <main className="main">
@@ -85,7 +94,7 @@ function Side({ view, setView, companies, lang, setLang, users, uid, setUid, sho
       </select>
       <div className="navsec">{t("Language")}</div>
       <div className="row" style={{ padding: "0 8px" }}>
-        <button className={`btn sm ${lang === "en" ? "pri" : ""}`} onClick={() => setLang("en")}>English</button>
+        <button className={`btn sm ${lang === "en" ? "pri" : ""}`} onClick={() => setLang("en")} data-no-translate>English</button>
         <button className={`btn sm ${lang === "ar" ? "pri" : ""}`} onClick={() => setLang("ar")}>العربية</button>
       </div>
       {showLogout && <button className="navbtn" style={{ marginTop: 12 }} onClick={async () => { await fetch("/api/auth/logout", { method: "POST" }); location.reload(); }}>تسجيل الخروج · Sign out</button>}
@@ -150,7 +159,8 @@ function Benchmarks({ meta }: { meta: any }) {
   const load = () => api.get(`/api/benchmarks?industry=${encodeURIComponent(ind)}`).then(setData);
   useEffect(() => { load(); }, [ind]);
   const run = async (p: Promise<any>) => { setMsg(""); try { await p; load(); } catch (e: any) { setMsg(e.message); } };
-  const name = (k: string) => meta?.ratios.find((r: any) => r.key === k)?.name_en || k;
+  const lang = useLang();
+  const name = (k: string) => { const r = meta?.ratios.find((r: any) => r.key === k); return (lang === "ar" ? r?.name_ar : r?.name_en) || k; };
   return (
     <>
       <div className="topbar"><h1>Benchmarks</h1></div>
@@ -159,7 +169,7 @@ function Benchmarks({ meta }: { meta: any }) {
         <div className="row"><b>Industry</b><select value={ind} onChange={(e) => setInd(e.target.value)}>{(meta?.industries || []).map((i: string) => <option key={i}>{i}</option>)}</select></div>
         <h3>Add / update</h3>
         <div className="row">
-          <select value={f.ratio_key} onChange={(e) => setF({ ...f, ratio_key: e.target.value })}>{(meta?.ratios || []).map((r: any) => <option key={r.key} value={r.key}>{r.name_en}</option>)}</select>
+          <select value={f.ratio_key} onChange={(e) => setF({ ...f, ratio_key: e.target.value })}>{(meta?.ratios || []).map((r: any) => <option key={r.key} value={r.key}>{name(r.key)}</option>)}</select>
           <input type="number" placeholder="Value (ratios as decimals, e.g. 0.45 for 45%)" value={f.value} style={{ width: 280 }} onChange={(e) => setF({ ...f, value: e.target.value })} />
           <input type="text" value={f.source} onChange={(e) => setF({ ...f, source: e.target.value })} />
           <button className="btn pri" disabled={!f.value} onClick={() => run(api.post("/api/benchmarks", { industry: ind, ratio_key: f.ratio_key, value: Number(f.value), source: f.source }))}>Save</button>
@@ -182,6 +192,7 @@ function Benchmarks({ meta }: { meta: any }) {
 }
 
 function Compare({ companies }: { companies: any[] }) {
+  const lang = useLang();
   const [sel, setSel] = useState<number[]>([]);
   const [res, setRes] = useState<any>(null);
   const [err, setErr] = useState("");
@@ -205,7 +216,7 @@ function Compare({ companies }: { companies: any[] }) {
           <div className="scroll"><table>
             <thead><tr><th>Ratio</th><th>Year</th>{res.companies.map((c: any) => <th key={c.company.id} className="n">{c.company.name}</th>)}</tr></thead>
             <tbody>{Object.keys(res.ratio_meta).flatMap((k) => res.common_years.map((y: number, i: number) => (
-              <tr key={k + y}><td>{i === 0 ? <b>{res.ratio_meta[k].name_en}</b> : ""}</td><td>{y}</td>
+              <tr key={k + y}><td>{i === 0 ? <b>{(lang === "ar" && res.ratio_meta[k].name_ar) || res.ratio_meta[k].name_en}</b> : ""}</td><td>{y}</td>
                 {res.companies.map((c: any) => { const cell = c.ratios[k]?.[y]; return <td key={c.company.id} className="n">{cell?.display} {cell && cell.status !== "verified" && cell.status !== "approved_assumption" && <Chip s={cell.status} />}</td>; })}
               </tr>)))}</tbody></table></div>
         </div>)}

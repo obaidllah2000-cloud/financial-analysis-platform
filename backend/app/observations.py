@@ -252,14 +252,22 @@ AREAS = {
 }
 
 
-def evaluation(an: Analysis, ratios: list[dict], observations: list[dict]) -> dict:
+def evaluation(an: Analysis, ratios: list[dict], observations: list[dict], lang: str = "en") -> dict:
+    """`ratios` and `observations` must already be in the requested language (see localize.py)."""
+    from .localize import AREA_AR, label
+    from .server_i18n import EXACT, TREND_AR
+    ar = lang == "ar"
+    nm = lambda r: r["name_ar"] if ar else r["name_en"]  # noqa: E731
+    rk = lambda x: (EXACT.get(x, x) + " المخاطر") if ar else f"{x} risk"  # noqa: E731
+    an_ = lambda a: AREA_AR.get(a, a) if ar else a  # noqa: E731
     rmap = {r["key"]: r for r in ratios}
     areas = []
     strengths, weaknesses, risks, recs = [], [], [], []
     for area, keys in AREAS.items():
         items = [rmap[k] for k in keys if k in rmap and any(c["value"] is not None for c in rmap[k]["cells"])]
         if not items:
-            areas.append({"area": area, "rating": "Insufficient data", "summary": "Not enough data for this area.", "ratios": []})
+            areas.append({"area": an_(area), "rating": EXACT["Insufficient data"] if ar else "Insufficient data",
+                          "rating_key": "Insufficient data", "summary": EXACT["Not enough data for this area."] if ar else "Not enough data for this area.", "ratios": []})
             continue
         highs = [r for r in items if r["risk"] == "High"]
         meds = [r for r in items if r["risk"] == "Medium"]
@@ -270,27 +278,31 @@ def evaluation(an: Analysis, ratios: list[dict], observations: list[dict]) -> di
         for r in items:
             last = next((c for c in reversed(r["cells"]) if c["value"] is not None), None)
             if last:
-                lines.append(f"{r['name_en']}: {last['display']} ({r['risk']} risk)")
-        areas.append({"area": area, "rating": rating, "provisional": prov, "summary": "; ".join(lines[:5]),
+                lines.append(f"{nm(r)}: {last['display']} ({rk(r['risk'])})")
+        areas.append({"area": an_(area), "rating": EXACT.get(rating, rating) if ar else rating, "rating_key": rating,
+                      "provisional": prov, "summary": "؛ ".join(lines[:5]) if ar else "; ".join(lines[:5]),
                       "ratios": [r["key"] for r in items]})
         for r in lows:
             if r["critical"]:
-                strengths.append(f"{r['name_en']} — {r['comment']}")
+                strengths.append(f"{nm(r)} — {r['comment']}")
         for r in highs + meds:
-            weaknesses.append(f"{r['name_en']} — {r['comment']} ({r['risk_basis']})")
+            weaknesses.append(f"{nm(r)} — {r['comment']} ({r['risk_basis']})")
             if r.get("action"):
-                recs.append(f"{area}: {r['action']}")
+                recs.append(f"{an_(area)}: {r['action']}")
     for o in observations:
         if o["type"] == "potential_risk":
             risks.append(f"{o['title']}: {o['finding']}")
-            recs.append(f"{o['area'].title()}: {o['required_action']}")
+            recs.append(f"{o['area'] if ar else o['area'].title()}: {o['required_action']}")
     hist = []
     kl = {k["key"]: k for k in an.key_lines()}
     for k in ("sales", "np", "ta", "equity", "ocf"):
         if k in kl and kl[k]["stats"].get("cagr") is not None:
-            hist.append(f"{kl[k]['label']}: CAGR {kl[k]['stats']['cagr'] * 100:.1f}% ({kl[k]['stats']['trend']})")
+            t = kl[k]["stats"]["trend"]
+            hist.append(f"{label(k, kl[k]['label'], lang)}: " + (f"معدل النمو السنوي المركب {kl[k]['stats']['cagr'] * 100:.1f}% ({TREND_AR.get(t, t)})"
+                        if ar else f"CAGR {kl[k]['stats']['cagr'] * 100:.1f}% ({t})"))
         elif k in kl:
-            hist.append(f"{kl[k]['label']}: {kl[k]['stats'].get('trend')} (CAGR not meaningful)")
+            t = kl[k]["stats"].get("trend")
+            hist.append(f"{label(k, kl[k]['label'], lang)}: " + (f"{TREND_AR.get(t, t)} (معدل النمو المركب غير ذي معنى)" if ar else f"{t} (CAGR not meaningful)"))
     seen = set()
     recs = [r for r in recs if not (r in seen or seen.add(r))]
     return {"areas": areas, "historical_performance": hist, "strengths": strengths[:10], "weaknesses": weaknesses[:12],

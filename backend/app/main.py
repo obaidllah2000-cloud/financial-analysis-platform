@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from . import assumptions as asm
 from . import auth
+from . import interpret, localize
 from . import excel_template, forecasting, llm, methodology, observations, reports, services, taxonomy
 from .engine import forecast as fc_engine
 from .db import get_db, init_db
@@ -225,7 +226,7 @@ def activate(uid: int, db: Session = Depends(get_db), u: User = Depends(ANALYST)
 
 
 @app.get("/api/companies/{cid}/review")
-def data_review(cid: int, db: Session = Depends(get_db)):
+def data_review(cid: int, lang: str = "en", db: Session = Depends(get_db)):
     c = company_or_404(db, cid)
     up = services.active_upload(db, cid)
     if up is None:
@@ -249,13 +250,13 @@ def data_review(cid: int, db: Session = Depends(get_db)):
         rows.append({"raw_id": r.id, "sheet": r.sheet, "row_no": r.row_no, "code": r.account_code, "account": r.account_name,
                      "year": r.year_raw, "value": r.value_raw, "parsed_value": float(v.value) if v else None, "kind": v.kind if v else None,
                      "hint": r.class_hint, "account_id": acc.id if acc else None,
-                     "suggested": cls.suggested_category if cls else None, "category_label": cat.label_en if cat else None,
+                     "suggested": cls.suggested_category if cls else None, "category_label": (cat.label_ar if lang == "ar" else cat.label_en) if cat else None,
                      "group": cat.group if cat else None, "confidence": cls.confidence if cls else None,
-                     "decision": cls.status if cls else None, "validation": sev, "messages": [i.message for i in iss]})
+                     "decision": cls.status if cls else None, "validation": sev, "messages": [localize.tr(i.message, lang) for i in iss]})
     return {"version": up.version, "filename": up.filename, "rows": rows,
-            "issues": [{"id": i.id, "severity": i.severity, "code": i.code, "message": i.message, "sheet": i.sheet, "row_no": i.row_no,
+            "issues": [{"id": i.id, "severity": i.severity, "code": i.code, "message": localize.tr(i.message, lang), "sheet": i.sheet, "row_no": i.row_no,
                         "account": i.account, "year": i.year, "acknowledged": i.acknowledged} for i in issues],
-            "checks": (services.build_analysis(db, c).checks() if services.build_analysis(db, c) else [])}
+            "checks": localize.checks(services.build_analysis(db, c).checks() if services.build_analysis(db, c) else [], lang)}
 
 
 @app.post("/api/issues/{iid}/acknowledge")
@@ -289,7 +290,7 @@ def cls_dict(acc: Account, cls: Classification, an=None) -> dict:
 
 
 @app.get("/api/companies/{cid}/classifications")
-def classifications(cid: int, db: Session = Depends(get_db)):
+def classifications(cid: int, lang: str = "en", db: Session = Depends(get_db)):
     c = company_or_404(db, cid)
     an = services.build_analysis(db, c)
     up = services.active_upload(db, cid)
@@ -297,7 +298,7 @@ def classifications(cid: int, db: Session = Depends(get_db)):
     out = []
     for acc, cls in db.execute(select(Account, Classification).join(Classification).where(Account.company_id == cid).order_by(Account.sort_order)):
         if acc.id in active_ids:
-            out.append(cls_dict(acc, cls, an))
+            out.append(localize.classification(cls_dict(acc, cls, an), lang))
     return out
 
 
@@ -374,7 +375,7 @@ def decide(account_id: int, d: Decision, db: Session = Depends(get_db), u: User 
 
 # ------------------------------------------------------------------ assumptions
 @app.get("/api/companies/{cid}/assumptions")
-def get_assumptions(cid: int, db: Session = Depends(get_db)):
+def get_assumptions(cid: int, lang: str = "en", db: Session = Depends(get_db)):
     c = company_or_404(db, cid)
     an = services.build_analysis(db, c)
     facts = services.data_facts(db, c)
@@ -390,7 +391,7 @@ def get_assumptions(cid: int, db: Session = Depends(get_db)):
                     "reason": a.reason, "supporting_data": a.supporting_data, "options": d.options, "status": a.status,
                     "critical": d.critical, "relevant": relevant.get(a.key, True), "analyst_note": a.analyst_note,
                     "decided_at": a.decided_at.isoformat() if a.decided_at else None, "impact": impact, "dependent_ratios": deps})
-    return out
+    return [localize.assumption(x, lang) for x in out]
 
 
 class AssumptionDecision(BaseModel):
@@ -440,13 +441,33 @@ def _analysis(db, cid, years=None, methodology_=None):
 
 
 @app.get("/api/companies/{cid}/analysis")
-def analysis(cid: int, years: str | None = None, methodology: str | None = None, db: Session = Depends(get_db)):
+def analysis(cid: int, years: str | None = None, methodology: str | None = None, lang: str = "en", db: Session = Depends(get_db)):
     c, an = _analysis(db, cid, years, methodology)
-    return an.full() | {"all_years": services.load_inputs(db, c, services.active_upload(db, cid))[1]}
+    full = an.full()
+    full["ratios"] = localize.ratios(full["ratios"], lang)
+    full["key_lines"] = localize.key_lines(full["key_lines"], lang)
+    full["checks"] = localize.checks(full["checks"], lang)
+    full["sources_uses"] = localize.sources_uses(full["sources_uses"], lang)
+    if lang == "ar":
+        full["status_text"] = {k: localize.tr(v, lang) for k, v in full["status_text"].items()}
+        full["flag_text"] = {k: localize.tr(v, lang) for k, v in full["flag_text"].items()}
+    return full | {"all_years": services.load_inputs(db, c, services.active_upload(db, cid))[1]}
+
+
+@app.get("/api/companies/{cid}/interpretation")
+def interpretation(cid: int, lang: str = "en", years: str | None = None, db: Session = Depends(get_db)):
+    """Academic (professor's method) 7-step interpretation for every ratio and year, plus DuPont and sources & uses."""
+    c, an = _analysis(db, cid, years)
+    rs = localize.ratios(an.ratios(), lang)
+    sus = an.sources_uses()
+    return {"years": an.years, "ratios": interpret.interpret_all(rs, lang, c.currency or ""),
+            "dupont": {y: interpret.interpret_dupont(rs, y, lang) for y in an.years},
+            "sources_uses": [{"from_year": x["from_year"], "to_year": x["to_year"], "text": interpret.interpret_sources_uses(x, lang)}
+                             for x in sus]}
 
 
 @app.get("/api/companies/{cid}/statements/{st}")
-def statements(cid: int, st: str, years: str | None = None, db: Session = Depends(get_db)):
+def statements(cid: int, st: str, years: str | None = None, lang: str = "en", db: Session = Depends(get_db)):
     c, an = _analysis(db, cid, years)
     obs = observations.review(an)
     notes = {}
@@ -456,15 +477,23 @@ def statements(cid: int, st: str, years: str | None = None, db: Session = Depend
     rows = an.statement_rows(st.upper())
     for r in rows:
         r["observations"] = notes.get(r["account"], [])
-    return {"years": an.years, "rows": rows, "key_lines": [k for k in an.key_lines() if k["statement"] == st.upper()]}
+    return {"years": an.years, "rows": localize.statement_rows(rows, lang),
+            "key_lines": localize.key_lines([k for k in an.key_lines() if k["statement"] == st.upper()], lang)}
 
 
 @app.get("/api/companies/{cid}/trace/{ratio}/{year}")
-def trace(cid: int, ratio: str, year: int, db: Session = Depends(get_db)):
+def trace(cid: int, ratio: str, year: int, lang: str = "en", db: Session = Depends(get_db)):
     c, an = _analysis(db, cid)
     if ratio not in {r.key for r in RATIOS} or year not in an.years:
         raise HTTPException(404)
-    return an.ratio_trace(ratio, year)
+    t = an.ratio_trace(ratio, year)
+    if lang == "ar":
+        t["cell"] = dict(t["cell"], reasons=[localize.tr(x, lang) for x in t["cell"]["reasons"]],
+                         notes=[localize.tr(x, lang) for x in t["cell"]["notes"]])
+        t["status_text"] = localize.tr(t["status_text"], lang)
+        t["ratio"] = dict(t["ratio"], formula=interpret.formula_text(t["ratio"]["formula"], lang))
+        t["inputs"] = [dict(i, label=localize.label(i["key"], i["label"], lang)) for i in t["inputs"]]
+    return t
 
 
 @app.get("/api/companies/{cid}/aggregate/{key}/{year}")
@@ -477,13 +506,14 @@ def aggregate(cid: int, key: str, year: int, db: Session = Depends(get_db)):
 
 
 @app.get("/api/companies/{cid}/observations")
-def get_observations(cid: int, db: Session = Depends(get_db)):
+def get_observations(cid: int, lang: str = "en", db: Session = Depends(get_db)):
     c, an = _analysis(db, cid)
-    return observations.review(an, services.pending_questions(db, c))
+    return localize.observations(observations.review(an, services.pending_questions(db, c)), lang)
 
 
 class Chat(BaseModel):
     question: str
+    lang: str = "en"
 
 
 @app.post("/api/companies/{cid}/chat")
@@ -501,26 +531,29 @@ def chat(cid: int, body: Chat, db: Session = Depends(get_db)):
     if not res["ok"]:
         q = body.question.lower()
         rel = [o for o in obs if any(w in (o["title"] + o["area"] + o["finding"]).lower() for w in q.split() if len(w) > 3)] or obs[:5]
-        res["fallback"] = rel[:6]
+        res["fallback"] = localize.observations(rel[:6], body.lang)
+        if body.lang == "ar":
+            res["reason"] = "Claude غير مفعّل على الخادم (لم يُضبط ANTHROPIC_API_KEY). هذه هي الملاحظات المطابقة من محرك التحليل:"
     return res
 
 
-def build_report(db: Session, c: Company, years=None, methodology_=None) -> dict:
+def build_report(db: Session, c: Company, years=None, methodology_=None, lang: str = "en") -> dict:
     an = services.build_analysis(db, c, years, methodology_)
     if an is None:
         raise HTTPException(409, "No financial data uploaded yet.")
     gov = services.governance(db, c)
-    obs = observations.review(an, services.pending_questions(db, c))
-    ratios = an.ratios()
-    ev = observations.evaluation(an, ratios, obs)
+    obs = localize.observations(observations.review(an, services.pending_questions(db, c)), lang)
+    ratios = localize.ratios(an.ratios(), lang)
+    ev = observations.evaluation(an, ratios, obs, lang)
     ass = []
     for a in db.scalars(select(Assumption).where(Assumption.company_id == c.id)):
         d = asm.BY_KEY.get(a.key)
         if d is None:
             continue
         label = next((o["label"] for o in d.options if o["value"] == a.value), a.value)
-        ass.append({"key": a.key, "name": d.name, "value": a.value, "value_label": label, "status": a.status, "reason": a.reason,
-                    "supporting_data": a.supporting_data, "decided_at": a.decided_at.isoformat() if a.decided_at else None})
+        ass.append({"key": a.key, "name": d.name_ar if lang == "ar" else d.name, "value": a.value,
+                    "value_label": localize.tr(label, lang), "status": a.status, "reason": localize.tr(a.reason, lang),
+                    "supporting_data": localize.tr(a.supporting_data, lang), "decided_at": a.decided_at.isoformat() if a.decided_at else None})
     limitations = []
     if gov.get("critical_pending_classifications"):
         limitations.append(f"{gov['critical_pending_classifications']} account classification(s) are not yet approved — dependent results are provisional.")
@@ -540,14 +573,24 @@ def build_report(db: Session, c: Company, years=None, methodology_=None) -> dict
     up = services.active_upload(db, c.id)
     approved = bool(snap and up and snap.upload_id == up.id and (last_change is None or _aware(snap.approved_at) >= _aware(last_change)))
     status = "approved" if approved else ("ready_for_approval" if gov.get("ready_for_approval") else "provisional")
+    limitations = [localize.tr(x, lang) for x in limitations]
     status_text = {"approved": f"Approved by analyst on {snap.approved_at:%Y-%m-%d %H:%M}" if approved else "",
                    "ready_for_approval": "Draft — all reviews complete, awaiting analyst approval",
                    "provisional": "PROVISIONAL — pending classifications, assumptions or data errors remain"}[status]
-    return {"company": company_dict(c), "years": an.years, "governance": gov, "key_lines": an.key_lines(), "ratios": ratios,
-            "statements": {st: an.statement_rows(st) for st in ("BS", "IS", "CF")}, "sources_uses": an.sources_uses(),
+    sus = an.sources_uses()
+    yrs = an.years
+    return {"company": company_dict(c), "years": yrs, "lang": lang, "governance": gov,
+            "key_lines": localize.key_lines(an.key_lines(), lang), "ratios": ratios,
+            "statements": {st: localize.statement_rows(an.statement_rows(st), lang) for st in ("BS", "IS", "CF")},
+            "sources_uses": localize.sources_uses(sus, lang),
+            "interpretation": {"ratios": interpret.interpret_all(ratios, lang, c.currency or ""),
+                               "dupont": {y: interpret.interpret_dupont(ratios, y, lang) for y in yrs},
+                               "sources_uses": [{"from_year": x["from_year"], "to_year": x["to_year"],
+                                                 "text": interpret.interpret_sources_uses(x, lang)} for x in sus]},
             "observations": obs, "evaluation": ev, "assumptions": ass, "limitations": limitations, "approval_status": status,
-            "approval_status_text": status_text, "status_text": an.full()["status_text"], "flag_text": an.full()["flag_text"],
-            "checks": an.checks()}
+            "approval_status_text": localize.tr(status_text, lang),
+            "status_text": {k: localize.tr(v, lang) for k, v in an.full()["status_text"].items()}, "flag_text": an.full()["flag_text"],
+            "checks": localize.checks(an.checks(), lang)}
 
 
 def _aware(d):
@@ -555,9 +598,9 @@ def _aware(d):
 
 
 @app.get("/api/companies/{cid}/evaluation")
-def evaluation(cid: int, years: str | None = None, db: Session = Depends(get_db)):
+def evaluation(cid: int, years: str | None = None, lang: str = "en", db: Session = Depends(get_db)):
     c = company_or_404(db, cid)
-    r = build_report(db, c, _years(years))
+    r = build_report(db, c, _years(years), lang=lang)
     return {k: r[k] for k in ("evaluation", "limitations", "approval_status", "approval_status_text", "governance", "observations", "years")}
 
 
@@ -580,23 +623,24 @@ def approve(cid: int, db: Session = Depends(get_db), u: User = Depends(ANALYST))
 
 
 @app.get("/api/companies/{cid}/report.{fmt}")
-def report(cid: int, fmt: str, years: str | None = None, modules: str | None = None, db: Session = Depends(get_db)):
+def report(cid: int, fmt: str, years: str | None = None, modules: str | None = None, lang: str = "en",
+           db: Session = Depends(get_db)):
     c = company_or_404(db, cid)
-    rep = build_report(db, c, _years(years))
+    rep = build_report(db, c, _years(years), lang=lang)
     mods = modules.split(",") if modules else reports.MODULES
     safe = "".join(ch for ch in c.name if ch.isalnum() or ch in " -_").strip().replace(" ", "_") or "company"
     if fmt == "xlsx":
         return Response(reports.excel(rep, mods), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        headers={"Content-Disposition": f'attachment; filename="{safe}_financial_analysis.xlsx"'})
+                        headers={"Content-Disposition": f'attachment; filename="{safe}_financial_analysis_{lang}.xlsx"'})
     if fmt == "pdf":
         return Response(reports.pdf(rep, mods), media_type="application/pdf",
-                        headers={"Content-Disposition": f'attachment; filename="{safe}_financial_analysis.pdf"'})
+                        headers={"Content-Disposition": f'attachment; filename="{safe}_financial_analysis_{lang}.pdf"'})
     raise HTTPException(404)
 
 
 @app.get("/api/companies/{cid}/report")
-def report_json(cid: int, years: str | None = None, db: Session = Depends(get_db)):
-    return build_report(db, company_or_404(db, cid), _years(years))
+def report_json(cid: int, years: str | None = None, lang: str = "en", db: Session = Depends(get_db)):
+    return build_report(db, company_or_404(db, cid), _years(years), lang=lang)
 
 
 @app.get("/api/companies/{cid}/audit")
